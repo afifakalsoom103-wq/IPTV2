@@ -14,24 +14,70 @@ window.I18N = {"DICT":{"index":{"de":{"5":"Startseite","7":"Einrichtung","8":"Je
 
   /* ---------- make the menu work on any hosting setup ----------
      Pages link to each other as index.html / shop.html / setup.html.
-     If this host serves them as folders (/shop/) or without the .html
-     (/shop), a plain relative link would resolve to the wrong place, so
-     rewrite the menu links to point at the site root instead. */
+     Different hosts serve them at different addresses (/shop.html,
+     /shop, /shop/, or inside /repository-name/ on GitHub Pages), so
+     instead of assuming, we TEST the possible addresses when a menu
+     link is clicked and go to whichever one actually exists. The
+     working pattern is remembered for the rest of the visit. */
   (function () {
-    var path = location.pathname;
-    var isFile = /\.html$/i.test(path);
-    var isRoot = path === "/" || path === "";
-    if (isFile || isRoot) return;              // normal hosting: leave links alone
-    var clean = !/\/$/.test(path);             // /shop  -> strip .html
-    var links = document.getElementsByTagName("a");
-    for (var i = 0; i < links.length; i++) {
-      var h = links[i].getAttribute("href") || "";
-      var m = /^(index|shop|setup)\.html$/i.exec(h);
-      if (!m) continue;
-      var name = m[1].toLowerCase();
-      if (name === "index") links[i].setAttribute("href", "/");
-      else links[i].setAttribute("href", "/" + name + (clean ? "" : ".html"));
+    var here = location.href.split("#")[0].split("?")[0];
+    var dir = here.replace(/[^\/]*$/, "");            // folder holding this page
+    var upDir = dir.replace(/[^\/]+\/$/, "");          // one level up (for /shop/ style)
+
+    function candidates(name) {
+      var list = [
+        dir + name + ".html",
+        dir + name,
+        dir + name + "/",
+        upDir + name + ".html",
+        upDir + name,
+        upDir + name + "/"
+      ];
+      var out = [], seen = {};
+      for (var i = 0; i < list.length; i++) {
+        if (!seen[list[i]]) { seen[list[i]] = 1; out.push(list[i]); }
+      }
+      return out;
     }
+
+    function remembered(name) {
+      try { return sessionStorage.getItem("iptvweb_url_" + name); } catch (e) { return null; }
+    }
+    function remember(name, url) {
+      try { sessionStorage.setItem("iptvweb_url_" + name, url); } catch (e) {}
+    }
+
+    function exists(url) {
+      return fetch(url, { method: "GET" })
+        .then(function (r) { return r.ok ? url : null; })
+        .catch(function () { return null; });
+    }
+
+    function firstWorking(name, done) {
+      var saved = remembered(name);
+      if (saved) { done(saved); return; }
+      var list = candidates(name), i = 0;
+      (function next() {
+        if (i >= list.length) { done(list[0]); return; }   // nothing verified: use the plain guess
+        var url = list[i++];
+        exists(url).then(function (ok) {
+          if (ok) { remember(name, ok); done(ok); }
+          else next();
+        });
+      })();
+    }
+
+    document.addEventListener("click", function (e) {
+      var a = e.target.closest ? e.target.closest("a") : null;
+      if (!a || a.target === "_blank") return;
+      var h = a.getAttribute("href") || "";
+      var m = /^(index|shop|setup)\.html$/i.exec(h);
+      if (!m) return;
+      // file:// (opened from your computer) already works — leave it alone
+      if (location.protocol === "file:") return;
+      e.preventDefault();
+      firstWorking(m[1].toLowerCase(), function (url) { location.href = url; });
+    }, true);
   })();
   var dict = (window.I18N.DICT[page]) || {};
   var meta = (window.I18N.META[page]) || {};
@@ -138,4 +184,3 @@ window.I18N = {"DICT":{"index":{"de":{"5":"Startseite","7":"Einrichtung","8":"Je
     }
   }
 })();
-
